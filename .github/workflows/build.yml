@@ -69,7 +69,7 @@ jobs:
           else
             BASE="${{ steps.base_version.outputs.base }}"
             SHORT_SHA="${GITHUB_SHA:0:7}"
-            FINAL_VERSION="${BASE}-${SHORT_SHA}-dev"
+            FINAL_VERSION="${BASE}-${SHORT_SHA}-${{ github.run_number }}-dev"
           fi
 
           echo "version=$FINAL_VERSION" >> "$GITHUB_OUTPUT"
@@ -153,7 +153,7 @@ jobs:
       - name: '[🚀] Upload Artifact'
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: mod-artifact
+          name: ${{ needs.info.outputs.version }}-${{ github.run_number }}-${{ github.sha }}-dev
           path: build/libs/*.jar
           if-no-files-found: error
 
@@ -166,32 +166,7 @@ jobs:
       - name: '[📦] Download artifact'
         uses: actions/download-artifact@v8
         with:
-          name: mod-artifact
-
-      - name: '[🔒] Check available platforms'
-        id: check_platforms
-        shell: bash
-        run: |
-          echo "=== Checking publishing targets ==="
-
-          HAS_MODRINTH="false"
-          if [ -n "${{ secrets.MODRINTH_TOKEN }}" ] && [ -n "${{ vars.MODRINTH_ID }}" ]; then
-            HAS_MODRINTH="true"
-            echo "✅ Modrinth: configured"
-          else
-            echo "⚠️  Modrinth: skipped (set MODRINTH_TOKEN and MODRINTH_ID to enable)"
-          fi
-
-          HAS_CURSEFORGE="false"
-          if [ -n "${{ secrets.CURSEFORGE_TOKEN }}" ] && [ -n "${{ vars.CURSEFORGE_ID }}" ]; then
-            HAS_CURSEFORGE="true"
-            echo "✅ CurseForge: configured"
-          else
-            echo "⚠️  CurseForge: skipped (set CURSEFORGE_TOKEN and CURSEFORGE_ID to enable)"
-          fi
-
-          echo "modrinth=$HAS_MODRINTH" >> "$GITHUB_OUTPUT"
-          echo "curseforge=$HAS_CURSEFORGE" >> "$GITHUB_OUTPUT"
+          name: ${{ needs.info.outputs.version }}-${{ github.run_number }}-${{ github.sha }}-dev
 
       - name: '[🔒] Verify artifact'
         shell: bash
@@ -205,14 +180,16 @@ jobs:
           echo "✅ Found $JAR_COUNT jar(s):"
           ls -1 *.jar
 
-      - name: '[🚀] Release to GitHub'
+      - name: '[🚀] Release to Modrinth, CurseForge & GitHub'
         uses: Xikaro/game-publish@3.3.3
         with:
-          modrinth-id: ${{ steps.check_platforms.outputs.modrinth == 'true' && vars.MODRINTH_ID || '' }}
-          modrinth-token: ${{ steps.check_platforms.outputs.modrinth == 'true' && secrets.MODRINTH_TOKEN || '' }}
+          modrinth-id: ${{ vars.MODRINTH_ID }}
+          modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
+          modrinth-fail-mode: skip
 
-          curseforge-id: ${{ steps.check_platforms.outputs.curseforge == 'true' && vars.CURSEFORGE_ID || '' }}
-          curseforge-token: ${{ steps.check_platforms.outputs.curseforge == 'true' && secrets.CURSEFORGE_TOKEN || '' }}
+          curseforge-id: ${{ vars.CURSEFORGE_ID }}
+          curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
+          curseforge-fail-mode: skip
 
           github-name: ${{ github.ref_name }}
           github-tag: ${{ github.ref_name }}
