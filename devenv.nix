@@ -9,6 +9,7 @@
   };
 
   env = {
+    MOD_VERSION = "0.0.0";
     GRADLE_USER_HOME = "./.gradle";
     LD_LIBRARY_PATH = with pkgs; lib.makeLibraryPath [
       libGL

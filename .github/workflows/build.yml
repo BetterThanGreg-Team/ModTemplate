@@ -1,10 +1,5 @@
 # This workflow is adapted from TerraFirmaGreg-Team/Core-Modern
 # Original: https://github.com/TerraFirmaGreg-Team/Core-Modern/blob/dev/.github/workflows/build.yml
-#
-# Modifications:
-#   - Version extracted from tag (not gradle.properties)
-#   - Uses VERSION env var (matching template's System.getenv("VERSION"))
-#   - Uses glob pattern for artifact (avoids needing mod_id in workflow)
 
 name: Project Build
 run-name: '[📦]: Project Build #${{ github.run_number }}'
@@ -49,53 +44,68 @@ jobs:
         with:
           fail: true
           ignore_case: true
-          files: build.gradle.kts, gradle.properties, LICENSE.txt, README.md, src
+          files: build.gradle.kts, gradle.properties, LICENSE.txt, README.md, src, devenv.nix
 
-      - name: '[📥] Extract version'
+      - name: '[📥] Get base version from devenv.nix'
+        id: base_version
+        shell: bash
+        run: |
+          BASE_VERSION=$(grep -oP 'MOD_VERSION\s*=\s*"\K[^"]+' devenv.nix)
+          echo "base=$BASE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Base version: $BASE_VERSION"
+
+      - name: '[📥] Build final version and detect trigger type'
         id: version
         shell: bash
         run: |
+          IS_RELEASE="false"
+
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+            FINAL_VERSION="${{ github.event.inputs.version }}"
+            IS_RELEASE="true"
           elif [[ "${{ github.ref_type }}" == "tag" ]]; then
-            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+            FINAL_VERSION="${GITHUB_REF_NAME#v}"
+            IS_RELEASE="true"
           else
-            # Push to dev — use a dev build number
-            echo "version=${{ github.sha }}-dev" >> "$GITHUB_OUTPUT"
+            BASE="${{ steps.base_version.outputs.base }}"
+            SHORT_SHA="${GITHUB_SHA:0:7}"
+            FINAL_VERSION="${BASE}-${SHORT_SHA}-dev"
           fi
+
+          echo "version=$FINAL_VERSION" >> "$GITHUB_OUTPUT"
+          echo "is_release=$IS_RELEASE" >> "$GITHUB_OUTPUT"
 
       - name: '[🔍] Determine version type'
         id: version_type
         shell: bash
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          if [[ "$VERSION" == *-alpha* ]]; then
-            echo "type=alpha" >> "$GITHUB_OUTPUT"
-          elif [[ "$VERSION" == *-beta* ]]; then
-            echo "type=beta" >> "$GITHUB_OUTPUT"
-          elif [[ "$VERSION" == *-rc* ]]; then
-            echo "type=beta" >> "$GITHUB_OUTPUT"
+          IS_RELEASE="${{ steps.version.outputs.is_release }}"
+
+          if [[ "$IS_RELEASE" == "false" ]]; then
+            echo "type=unreleased" >> "$GITHUB_OUTPUT"
           else
-            echo "type=release" >> "$GITHUB_OUTPUT"
+            VERSION="${{ steps.version.outputs.version }}"
+            if [[ "$VERSION" == *-alpha* ]]; then
+              echo "type=alpha" >> "$GITHUB_OUTPUT"
+            elif [[ "$VERSION" == *-beta* ]]; then
+              echo "type=beta" >> "$GITHUB_OUTPUT"
+            elif [[ "$VERSION" == *-rc* ]]; then
+              echo "type=beta" >> "$GITHUB_OUTPUT"
+            else
+              echo "type=release" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
       - name: '[🔍] Check'
         id: check
         shell: bash
         run: |
-          IS_TAG="false"
-          if [[ "${{ github.ref_type }}" == "tag" || "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            IS_TAG="true"
-          fi
-
           echo "version=${{ steps.version.outputs.version }}" >> "$GITHUB_OUTPUT"
           echo "version_type=${{ steps.version_type.outputs.type }}" >> "$GITHUB_OUTPUT"
-
-          # ── Metadata — adjust these when your mod changes ──
+          echo "make_release=${{ steps.version.outputs.is_release }}" >> "$GITHUB_OUTPUT"
           echo "game_version=1.21.1" >> "$GITHUB_OUTPUT"
           echo "java_version=21" >> "$GITHUB_OUTPUT"
           echo "loaders=neoforge" >> "$GITHUB_OUTPUT"
-          echo "make_release=$IS_TAG" >> "$GITHUB_OUTPUT"
 
       - name: '[📝] Generate Build Summary'
         uses: WcAServices/markdown-template-action@v1.1.1
@@ -158,59 +168,51 @@ jobs:
         with:
           name: mod-artifact
 
-      - name: '[🔒] Verify secrets and variables'
+      - name: '[🔒] Check available platforms'
+        id: check_platforms
         shell: bash
         run: |
-          echo "=== Token Verification ==="
+          echo "=== Checking publishing targets ==="
 
-          if [ -z "${{ secrets.MODRINTH_TOKEN }}" ]; then
-            echo "::error::MODRINTH_TOKEN not found"
-            exit 1
+          HAS_MODRINTH="false"
+          if [ -n "${{ secrets.MODRINTH_TOKEN }}" ] && [ -n "${{ vars.MODRINTH_ID }}" ]; then
+            HAS_MODRINTH="true"
+            echo "✅ Modrinth: configured"
+          else
+            echo "⚠️  Modrinth: skipped (set MODRINTH_TOKEN and MODRINTH_ID to enable)"
           fi
-          echo "✅ MODRINTH_TOKEN: OK"
 
-          if [ -z "${{ secrets.CURSEFORGE_TOKEN }}" ]; then
-            echo "::error::CURSEFORGE_TOKEN not found"
-            exit 1
+          HAS_CURSEFORGE="false"
+          if [ -n "${{ secrets.CURSEFORGE_TOKEN }}" ] && [ -n "${{ vars.CURSEFORGE_ID }}" ]; then
+            HAS_CURSEFORGE="true"
+            echo "✅ CurseForge: configured"
+          else
+            echo "⚠️  CurseForge: skipped (set CURSEFORGE_TOKEN and CURSEFORGE_ID to enable)"
           fi
-          echo "✅ CURSEFORGE_TOKEN: OK"
 
-          echo ""
-          echo "=== ID Verification ==="
+          echo "modrinth=$HAS_MODRINTH" >> "$GITHUB_OUTPUT"
+          echo "curseforge=$HAS_CURSEFORGE" >> "$GITHUB_OUTPUT"
 
-          if [ -z "${{ vars.MODRINTH_ID }}" ]; then
-            echo "::error::MODRINTH_ID not found"
-            exit 1
-          fi
-          echo "✅ MODRINTH_ID: OK"
-
-          if [ -z "${{ vars.CURSEFORGE_ID }}" ]; then
-            echo "::error::CURSEFORGE_ID not found"
-            exit 1
-          fi
-          echo "✅ CURSEFORGE_ID: OK"
-
-          echo ""
-          echo "=== Artifact Verification ==="
-
+      - name: '[🔒] Verify artifact'
+        shell: bash
+        run: |
           JAR_COUNT=$(ls -1 *.jar 2>/dev/null | wc -l)
           if [ "$JAR_COUNT" -eq 0 ]; then
             echo "::error::No jar files found"
             ls -la
             exit 1
           fi
-
           echo "✅ Found $JAR_COUNT jar(s):"
           ls -1 *.jar
-          echo ""
 
-      - name: '[🚀] Release'
+      - name: '[🚀] Release to GitHub'
         uses: Xikaro/game-publish@3.3.3
         with:
-          modrinth-id: ${{ vars.MODRINTH_ID }}
-          modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
-          curseforge-id: ${{ vars.CURSEFORGE_ID }}
-          curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
+          modrinth-id: ${{ steps.check_platforms.outputs.modrinth == 'true' && vars.MODRINTH_ID || '' }}
+          modrinth-token: ${{ steps.check_platforms.outputs.modrinth == 'true' && secrets.MODRINTH_TOKEN || '' }}
+
+          curseforge-id: ${{ steps.check_platforms.outputs.curseforge == 'true' && vars.CURSEFORGE_ID || '' }}
+          curseforge-token: ${{ steps.check_platforms.outputs.curseforge == 'true' && secrets.CURSEFORGE_TOKEN || '' }}
 
           github-name: ${{ github.ref_name }}
           github-tag: ${{ github.ref_name }}
