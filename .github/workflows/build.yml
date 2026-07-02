@@ -211,3 +211,22 @@ jobs:
           retry-attempts: 2
           retry-delay: 10000
           fail-mode: fail
+
+      - name: '[📝] Checkout dev branch to bump MOD_VERSION'
+        uses: actions/checkout@v7
+        with:
+          ref: dev
+          fetch-depth: 0
+
+      - name: '[📝] Bump MOD_VERSION in devenv.nix'
+        shell: bash
+        run: |
+          NEW_VERSION="${{ needs.info.outputs.version }}"
+          echo "Bumping MOD_VERSION to $NEW_VERSION"
+          sed -i 's/^    MOD_VERSION = ".*"/    MOD_VERSION = "'"$NEW_VERSION"'"/' devenv.nix
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add devenv.nix
+          # Only commit if there's an actual change
+          git diff --staged --quiet || git commit -m "Bump MOD_VERSION to $NEW_VERSION"
+          git push
