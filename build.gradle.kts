@@ -2,7 +2,7 @@ plugins {
     id("java-library")
     id("maven-publish")
     id("net.neoforged.gradle.userdev") version "7.1.38"
-    id("net.neoforged.licenser") version "0.7.2"
+    id("net.neoforged.licenser") version "0.7.5"
 }
 
 // ── Mod metadata ───────────────────────────────────────────────────────────────
