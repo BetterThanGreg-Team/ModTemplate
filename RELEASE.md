@@ -5,7 +5,7 @@ This project uses **tag-based releases** with automated publishing to Modrinth, 
 ## How It Works
 
 1. **Development** happens on the `dev` branch via pull requests.
-2. **When ready to release**, create a tag (e.g., `0.1.0` or `v0.1.0`) on the `main` branch.
+2. **When ready to release**, create a tag (e.g., `0.1.0` or `v0.1.0`) on the `dev` branch.
 3. **GitHub Actions** triggers the `Release` workflow which:
    - Builds the mod with the version from the tag
    - Generates a changelog from all PRs merged since the last tag
@@ -36,12 +36,7 @@ Add these as **repository variables** (same page, click the "Variables" tab):
 
 ### Step-by-Step
 
-1. **Merge all changes** for the release into `main` from `dev`:
-   ```bash
-   git checkout main
-   git merge dev
-   git push origin main
-   ```
+1. **Make sure `dev` has all the changes** you want to release.
 
 2. **Create a tag** with the new version:
    ```bash
@@ -73,9 +68,7 @@ Save this as `release.sh`:
 #!/usr/bin/env bash
 set -euo pipefail
 VERSION="$1"
-git checkout main
-git merge dev
-git push origin main
+git checkout dev
 git tag "$VERSION"
 git push origin "$VERSION"
 echo "Release $VERSION triggered — watch it at: https://github.com/BetterThanGreg-Team/ModTemplate/actions"
@@ -87,7 +80,7 @@ Usage: `./release.sh 0.1.0`
 
 Changelogs are generated automatically by GitHub's **auto-generated release notes** feature. This means:
 
-- Every PR merged into `main` (or the branch you tag) appears in the changelog
+- Every PR merged into `dev` appears in the changelog
 - PRs are grouped by labels (e.g., `enhancement`, `bug`, `documentation`)
 - The changelog compares against the **previous tag** — so tagging `0.2.0` after `0.1.0` shows everything merged between those two tags
 
