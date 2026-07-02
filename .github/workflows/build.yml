@@ -1,11 +1,18 @@
 # This workflow is adapted from TerraFirmaGreg-Team/Core-Modern
 # Original: https://github.com/TerraFirmaGreg-Team/Core-Modern/blob/dev/.github/workflows/build.yml
+#
+# Modifications:
+#   - Version extracted from tag (not gradle.properties)
+#   - Uses VERSION env var (matching template's System.getenv("VERSION"))
+#   - Uses glob pattern for artifact (avoids needing mod_id in workflow)
 
-name: Release
-run-name: '[🚀] Release ${{ github.ref_name }}'
+name: Project Build
+run-name: '[📦]: Project Build #${{ github.run_number }}'
 
 on:
   push:
+    branches:
+      - dev
     tags:
       - 'v[0-9]*'
       - '[0-9]*'
@@ -15,21 +22,34 @@ on:
         description: 'Version to release (e.g. 0.1.0)'
         required: true
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   info:
     name: '[🖥️] Project Info'
     runs-on: ubuntu-latest
+    if: ${{ !github.event.repository.fork }}
     outputs:
       version: ${{ steps.check.outputs.version }}
       version_type: ${{ steps.check.outputs.version_type }}
       game_version: ${{ steps.check.outputs.game_version }}
       java_version: ${{ steps.check.outputs.java_version }}
       loaders: ${{ steps.check.outputs.loaders }}
+      make_release: ${{ steps.check.outputs.make_release }}
     steps:
       - name: '[📦] Checkout'
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+
+      - name: '[🔍] Check required files and folders'
+        uses: andstor/file-existence-action@v3.1.0
+        with:
+          fail: true
+          ignore_case: true
+          files: build.gradle.kts, gradle.properties, LICENSE.txt, README.md, src
 
       - name: '[📥] Extract version'
         id: version
@@ -37,8 +57,11 @@ jobs:
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
-          else
+          elif [[ "${{ github.ref_type }}" == "tag" ]]; then
             echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            # Push to dev — use a dev build number
+            echo "version=${{ github.sha }}-dev" >> "$GITHUB_OUTPUT"
           fi
 
       - name: '[🔍] Determine version type'
@@ -60,11 +83,39 @@ jobs:
         id: check
         shell: bash
         run: |
+          IS_TAG="false"
+          if [[ "${{ github.ref_type }}" == "tag" || "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            IS_TAG="true"
+          fi
+
           echo "version=${{ steps.version.outputs.version }}" >> "$GITHUB_OUTPUT"
           echo "version_type=${{ steps.version_type.outputs.type }}" >> "$GITHUB_OUTPUT"
+
+          # ── Metadata — adjust these when your mod changes ──
           echo "game_version=1.21.1" >> "$GITHUB_OUTPUT"
           echo "java_version=21" >> "$GITHUB_OUTPUT"
           echo "loaders=neoforge" >> "$GITHUB_OUTPUT"
+          echo "make_release=$IS_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: '[📝] Generate Build Summary'
+        uses: WcAServices/markdown-template-action@v1.1.1
+        with:
+          template: |
+            ## 📊 Build Information
+
+            ### Project Info
+            | Parameter | Value |
+            |-----------|-------|
+            | 📃 **Version** | `${{ steps.check.outputs.version }}` |
+            | 📃 **Release Type** | `${{ steps.check.outputs.version_type }}` |
+            | 📃 **Game Versions** | `${{ steps.check.outputs.game_version }}` |
+            | 📃 **Loaders** | `${{ steps.check.outputs.loaders }}` |
+
+            ### Build Decision
+            | Parameter | Value |
+            |-----------|-------|
+            | 📃 **Trigger** | `${{ github.ref_type }}` |
+            | 📃 **Make Release** | `${{ steps.check.outputs.make_release }}` |
 
   build:
     name: '[📦] Build Project'
@@ -100,6 +151,7 @@ jobs:
     name: '[🚀] Release'
     needs: [info, build]
     runs-on: ubuntu-latest
+    if: ${{ needs.info.outputs.make_release == 'true' }}
     steps:
       - name: '[📦] Download artifact'
         uses: actions/download-artifact@v8
