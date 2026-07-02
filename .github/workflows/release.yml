@@ -1,0 +1,88 @@
+name: Release
+run-name: '[🚀] Release ${{ github.ref_name }}'
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+      - '[0-9]*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Determine version type
+        id: version_type
+        shell: bash
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if [[ "$VERSION" == *-alpha* ]]; then
+            echo "type=alpha" >> $GITHUB_OUTPUT
+          elif [[ "$VERSION" == *-beta* ]]; then
+            echo "type=beta" >> $GITHUB_OUTPUT
+          elif [[ "$VERSION" == *-rc* ]]; then
+            echo "type=beta" >> $GITHUB_OUTPUT
+          else
+            echo "type=release" >> $GITHUB_OUTPUT
+          fi
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build with Gradle
+        run: ./gradlew build
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+
+      # Publish to Modrinth, CurseForge, and GitHub Releases
+      # See RELEASE.md for setup instructions
+      - name: Publish to Modrinth, CurseForge & GitHub
+        uses: Xikaro/game-publish@3.3.3
+        with:
+          # Platform IDs (set these as GitHub repository variables)
+          modrinth-id: ${{ vars.MODRINTH_ID }}
+          curseforge-id: ${{ vars.CURSEFORGE_ID }}
+
+          # API tokens (set these as GitHub secrets)
+          modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
+          curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
+
+          # GitHub release
+          github-name: ${{ github.ref_name }}
+          github-tag: ${{ github.ref_name }}
+          github-generate-changelog: true
+          github-draft: false
+          github-prerelease: ${{ steps.version_type.outputs.type != 'release' }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+          # Artifact
+          files: build/libs/*.jar
+          name: ${{ github.ref_name }}
+          version: ${{ steps.version.outputs.version }}
+          version-type: ${{ steps.version_type.outputs.type }}
+
+          # Platform metadata — adjust for your mod
+          loaders: neoforge
+          game-versions: 1.21.1
+          game-version-filter: none
+          java: 21
+
+          # Reliability
+          retry-attempts: 2
+          retry-delay: 10000
+          fail-mode: fail
