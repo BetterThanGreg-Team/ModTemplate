@@ -1,25 +1,182 @@
-name: Build
+# This workflow is adapted from TerraFirmaGreg-Team/Core-Modern
+# Original: https://github.com/TerraFirmaGreg-Team/Core-Modern/blob/dev/.github/workflows/build.yml
 
-on: [push, pull_request]
+name: Release
+run-name: '[🚀] Release ${{ github.ref_name }}'
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+      - '[0-9]*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g. 0.1.0)'
+        required: true
 
 jobs:
-  build:
+  info:
+    name: '[🖥️] Project Info'
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      version_type: ${{ steps.check.outputs.version_type }}
+      game_version: ${{ steps.check.outputs.game_version }}
+      java_version: ${{ steps.check.outputs.java_version }}
+      loaders: ${{ steps.check.outputs.loaders }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: '[📦] Checkout'
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          fetch-tags: true
 
-      - name: Setup JDK 21
-        uses: actions/setup-java@v4
+      - name: '[📥] Extract version'
+        id: version
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: '[🔍] Determine version type'
+        id: version_type
+        shell: bash
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if [[ "$VERSION" == *-alpha* ]]; then
+            echo "type=alpha" >> "$GITHUB_OUTPUT"
+          elif [[ "$VERSION" == *-beta* ]]; then
+            echo "type=beta" >> "$GITHUB_OUTPUT"
+          elif [[ "$VERSION" == *-rc* ]]; then
+            echo "type=beta" >> "$GITHUB_OUTPUT"
+          else
+            echo "type=release" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: '[🔍] Check'
+        id: check
+        shell: bash
+        run: |
+          echo "version=${{ steps.version.outputs.version }}" >> "$GITHUB_OUTPUT"
+          echo "version_type=${{ steps.version_type.outputs.type }}" >> "$GITHUB_OUTPUT"
+          echo "game_version=1.21.1" >> "$GITHUB_OUTPUT"
+          echo "java_version=21" >> "$GITHUB_OUTPUT"
+          echo "loaders=neoforge" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: '[📦] Build Project'
+    needs: [info]
+    runs-on: ubuntu-latest
+    steps:
+      - name: '[📦] Checkout'
+        uses: actions/checkout@v7
+
+      - name: '[📁] Setup Java'
+        uses: actions/setup-java@v5.4.0
         with:
-          java-version: '21'
-          distribution: 'temurin'
+          distribution: temurin
+          java-version: ${{ needs.info.outputs.java_version }}
+          cache: gradle
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
+      - name: '[📁] Prepare artifact'
+        run: |
+          chmod +x gradlew
+          ./gradlew build
+          ls -la build/libs/
+        env:
+          VERSION: ${{ needs.info.outputs.version }}
 
-      - name: Build with Gradle
-        run: ./gradlew build
+      - name: '[🚀] Upload Artifact'
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: mod-artifact
+          path: build/libs/*.jar
+          if-no-files-found: error
+
+  release:
+    name: '[🚀] Release'
+    needs: [info, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: '[📦] Download artifact'
+        uses: actions/download-artifact@v8
+        with:
+          name: mod-artifact
+
+      - name: '[🔒] Verify secrets and variables'
+        shell: bash
+        run: |
+          echo "=== Token Verification ==="
+
+          if [ -z "${{ secrets.MODRINTH_TOKEN }}" ]; then
+            echo "::error::MODRINTH_TOKEN not found"
+            exit 1
+          fi
+          echo "✅ MODRINTH_TOKEN: OK"
+
+          if [ -z "${{ secrets.CURSEFORGE_TOKEN }}" ]; then
+            echo "::error::CURSEFORGE_TOKEN not found"
+            exit 1
+          fi
+          echo "✅ CURSEFORGE_TOKEN: OK"
+
+          echo ""
+          echo "=== ID Verification ==="
+
+          if [ -z "${{ vars.MODRINTH_ID }}" ]; then
+            echo "::error::MODRINTH_ID not found"
+            exit 1
+          fi
+          echo "✅ MODRINTH_ID: OK"
+
+          if [ -z "${{ vars.CURSEFORGE_ID }}" ]; then
+            echo "::error::CURSEFORGE_ID not found"
+            exit 1
+          fi
+          echo "✅ CURSEFORGE_ID: OK"
+
+          echo ""
+          echo "=== Artifact Verification ==="
+
+          JAR_COUNT=$(ls -1 *.jar 2>/dev/null | wc -l)
+          if [ "$JAR_COUNT" -eq 0 ]; then
+            echo "::error::No jar files found"
+            ls -la
+            exit 1
+          fi
+
+          echo "✅ Found $JAR_COUNT jar(s):"
+          ls -1 *.jar
+          echo ""
+
+      - name: '[🚀] Release'
+        uses: Xikaro/game-publish@3.3.3
+        with:
+          modrinth-id: ${{ vars.MODRINTH_ID }}
+          modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
+          curseforge-id: ${{ vars.CURSEFORGE_ID }}
+          curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
+
+          github-name: ${{ github.ref_name }}
+          github-tag: ${{ github.ref_name }}
+          github-generate-changelog: true
+          github-draft: false
+          github-prerelease: ${{ needs.info.outputs.version_type != 'release' }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+          files: '*.jar'
+          name: ${{ needs.info.outputs.version }}
+          version: ${{ needs.info.outputs.version }}
+          version-type: ${{ needs.info.outputs.version_type }}
+
+          loaders: ${{ needs.info.outputs.loaders }}
+          game-versions: ${{ needs.info.outputs.game_version }}
+          game-version-filter: none
+          java: ${{ needs.info.outputs.java_version }}
+
+          retry-attempts: 2
+          retry-delay: 10000
+          fail-mode: fail

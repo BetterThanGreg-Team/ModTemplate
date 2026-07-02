@@ -1,0 +1,15 @@
+# Configuration from TerraFirmaGreg-Team/Core-Modern
+# See: https://github.com/TerraFirmaGreg-Team/Core-Modern/blob/dev/.github/dependabot.yml
+
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    open-pull-requests-limit: 1
+    schedule:
+      interval: weekly
+    groups:
+      dependencies:
+        applies-to: version-updates
+        patterns:
+          - '*'
